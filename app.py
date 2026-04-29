@@ -1,180 +1,115 @@
-import streamlit as st
-import tensorflow as tf
-import numpy as np
+import io
+import os
 import pickle
-from PIL import Image
 
-# Load the pickled model
-with open('SkinModel.pkl', 'rb') as file:
+import numpy as np
+from PIL import Image
+from flask import Flask, jsonify, request, send_from_directory
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+FRONTEND_DIST_DIR = os.path.join(BASE_DIR, "frontend website", "dist")
+FRONTEND_ASSETS_DIR = os.path.join(FRONTEND_DIST_DIR, "assets")
+MODEL_PATH = os.path.join(BASE_DIR, "SkinModel.pkl")
+
+
+with open(MODEL_PATH, "rb") as file:
     model = pickle.load(file)
 
-# Define the labels (these should match the order used during training)
+
 label_map = {
-    0: 'Melanocytic nevi',
-    1: 'Melanoma',
-    2: 'Benign keratosis-like lesions',
-    3: 'Basal cell carcinoma',
-    4: 'Actinic keratoses',
-    5: 'Vascular lesions',
-    6: 'Dermatofibroma'
+    0: "Melanocytic nevi",
+    1: "Melanoma",
+    2: "Benign keratosis-like lesions",
+    3: "Basal cell carcinoma",
+    4: "Actinic keratoses",
+    5: "Vascular lesions",
+    6: "Dermatofibroma",
+    7: "Other",
 }
 
-# Custom CSS for theme
-st.markdown(
-    """
-    <style>
-        body {
-            background-color: #f4f4f9;
-            color: #333333;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .title {
-            color: #2A2A72;
-            font-size: 3rem;
-            font-weight: bold;
-            text-align: center;
-            margin-top: 30px;
-        }
-        .subheader {
-            color: #4B4B8C;
-            font-size: 1.5rem;
-            text-align: center;
-            margin-top: -10px;
-        }
-        .description {
-            font-size: 1.1rem;
-            text-align: center;
-            margin-top: 20px;
-            color: #555555;
-        }
-        .content {
-            text-align: center;
-            margin-top: 50px;
-        }
-        .uploaded-image {
-            border: 3px solid #E0E1F7;
-            border-radius: 10px;
-            margin: 20px auto;
-            display: block;
-            width: 300px;
-            box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);
-        }
-        .prediction-text {
-            font-size: 1.8rem;
-            font-weight: bold;
-            color: #2A2A72;
-            text-align: center;
-            margin-top: 20px;
-        }
-        .confidence-text {
-            font-size: 1.2rem;
-            color: #555555;
-            text-align: center;
-        }
-        .button {
-            background-color: #2A2A72;
-            color: white;
-            font-size: 1.1rem;
-            padding: 12px 25px;
-            border-radius: 30px;
-            border: none;
-            margin-top: 30px;
-            cursor: pointer;
-            text-decoration: none;
-            transition: all 0.3s ease;
-        }
-        .button:hover {
-            background-color: #3B3B94;
-            box-shadow: 0px 5px 15px rgba(0, 0, 0, 0.2);
-        }
-        .footer {
-            font-size: 1rem;
-            color: #777777;
-            text-align: center;
-            margin-top: 50px;
-        }
-        .top-left-button {
-            position: fixed;
-            top: 45px;  /* Adjusted from 20px to 45px */
-            left: 20px;
-            background-color: #FF6F61;
-            color: white;
-            padding: 10px 20px;
-            border-radius: 25px;
-            font-size: 1rem;
-            border: none;
-            cursor: pointer;
-            box-shadow: 0px 5px 15px rgba(0, 0, 0, 0.2);
-            z-index: 9999;
-        }
-        .top-left-button:hover {
-            background-color: #FF4F3A;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
 
-# Streamlit app UI
-st.markdown("<div class='title'>Welcome to SkinAI</div>", unsafe_allow_html=True)
-st.markdown("<div class='subheader'>Empowering Healthy Skin, One Click at a Time</div>", unsafe_allow_html=True)
+CONFIDENCE_THRESHOLD = 0.7
 
-# Button to redirect to another page
-st.markdown(
-    """
-    <a href="http://localhost:5500/" target="_blank">
-        <button class="top-left-button">Go back to Home</button>
-    </a>
-    """,
-    unsafe_allow_html=True
-)
+app = Flask(__name__, static_folder=FRONTEND_DIST_DIR, static_url_path="")
 
-# Description of the app
-st.markdown("<div class='description'>SkinAI leverages cutting-edge AI technology to assist in the early detection of skin lesions. Upload an image and receive trusted predictions from our AI model.</div>", unsafe_allow_html=True)
 
-# Upload image
-st.markdown("<div class='content'>Upload an image of a skin lesion to classify it and receive trusted AI predictions.</div>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("Choose an image...", type=["jpg", "jpeg", "png"])
+@app.errorhandler(500)
+def handle_server_error(error):
+    return jsonify({"error": f"Server error: {error}"}), 500
 
-if uploaded_file is not None:
-    # Display the uploaded image
-    image = Image.open(uploaded_file)
-    st.image(image, caption='Uploaded Image', use_column_width=False, output_format="PNG", width=300)
 
-    # Ensure image has 3 channels (convert RGBA to RGB)
+def preprocess_image(file_storage):
+    image = Image.open(io.BytesIO(file_storage.read()))
+    original_image = image.copy()
+
     if image.mode != "RGB":
         image = image.convert("RGB")
 
-    # Preprocess the image
-    image = image.resize((128, 128))  # Resize to match model input size
-    image_array = np.array(image) / 255.0  # Normalize pixel values
-    image_array = np.expand_dims(image_array, axis=0)  # Add batch dimension
+    image = image.resize((128, 128))
+    image_array = np.array(image) / 255.0
+    image_array = np.expand_dims(image_array, axis=0)
 
-    # Make prediction
-    predictions = model.predict(image_array)
-    predicted_label = np.argmax(predictions)
-    confidence = predictions[0][predicted_label]
+    return original_image, image_array
 
-    # Display results
-    st.markdown(f"<div class='prediction-text'>Prediction: {label_map[predicted_label]}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='confidence-text'>Confidence: {confidence:.2%}</div>", unsafe_allow_html=True)
 
-# Footer with 'Get Started' button
-st.markdown(
-    """
-    <div style="text-align: center; margin-top: 50px;">
-        <a href="#" class="button">Get Started</a>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+@app.post("/api/predict")
+def predict():
+    uploaded_file = request.files.get("image")
+    if uploaded_file is None or uploaded_file.filename == "":
+        return jsonify({"error": "Please upload an image file."}), 400
 
-# Footer text
-st.markdown(
-    """
-    <div class='footer'>
-        <p>&copy; 2024 SkinAI | Empowering Healthy Skin, One Click at a Time</p>
-    </div>
-    """,
-    unsafe_allow_html=True
-)
+    try:
+        _, image_array = preprocess_image(uploaded_file)
+        predictions = model.predict(image_array)
+        predicted_label = int(np.argmax(predictions))
+        confidence = float(predictions[0][predicted_label])
+    except Exception as exc:
+        return jsonify({"error": f"Failed to process image: {exc}"}), 400
+
+    if confidence < CONFIDENCE_THRESHOLD:
+        return jsonify(
+            {
+                "prediction": "No skin disease detected",
+                "confidence": confidence,
+                "confidenceThreshold": CONFIDENCE_THRESHOLD,
+                "belowThreshold": True,
+            }
+        )
+
+    return jsonify(
+        {
+            "prediction": label_map[predicted_label],
+            "confidence": confidence,
+            "confidenceThreshold": CONFIDENCE_THRESHOLD,
+            "belowThreshold": False,
+        }
+    )
+
+
+@app.get("/assets/<path:filename>")
+def serve_assets(filename):
+    return send_from_directory(FRONTEND_ASSETS_DIR, filename)
+
+
+@app.get("/", defaults={"path": ""})
+@app.get("/<path:path>")
+def serve_frontend(path):
+    requested_path = os.path.join(FRONTEND_DIST_DIR, path)
+
+    if path and os.path.exists(requested_path) and os.path.isfile(requested_path):
+        return send_from_directory(FRONTEND_DIST_DIR, path)
+
+    index_path = os.path.join(FRONTEND_DIST_DIR, "index.html")
+    if os.path.exists(index_path):
+        return send_from_directory(FRONTEND_DIST_DIR, "index.html")
+
+    return (
+        "Frontend build not found. Run `npm install` and `npm run build` inside "
+        "`frontend website`, then start `python app.py` again.",
+        503,
+    )
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000, debug=True)
