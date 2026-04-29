@@ -2,3 +2,4 @@ frontend website/node_modules/
 frontend website/dist/
 __pycache__/
 .ipynb_checkpoints/
+images/
