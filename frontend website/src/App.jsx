@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   FiActivity,
   FiAlertTriangle,
@@ -21,7 +21,7 @@ const navLinks = [
   { label: "Home", href: "#home" },
   { label: "About", href: "#about" },
   { label: "Conditions", href: "#conditions" },
-  { label: "Diagnosis", href: "#diagnosis", accent: true },
+  { label: "Diagnosis", href: "#diagnosis" },
   { label: "Contact", href: "#contact" },
 ];
 
@@ -99,6 +99,9 @@ const initialFormState = {
 
 function App() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [activeNavLink, setActiveNavLink] = useState(() => window.location.hash || "#home");
+  const [lockedNavHref, setLockedNavHref] = useState(null);
+  const scrollCheckFrameRef = useRef(null);
   const [formData, setFormData] = useState(initialFormState);
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -109,7 +112,112 @@ function App() {
   const year = new Date().getFullYear();
   const confidencePercent = diagnosis ? Math.round(diagnosis.confidence * 100) : 0;
 
+  const getCurrentSectionHref = () => {
+    const headerElement = document.querySelector(".site-header");
+    const headerOffset = (headerElement?.offsetHeight ?? 0) + 40;
+    const scrollMarker = window.scrollY + headerOffset;
+    const pageBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+
+    let currentSectionHref = navLinks[0].href;
+
+    for (const link of navLinks) {
+      const sectionElement = document.querySelector(link.href);
+
+      if (!sectionElement) {
+        continue;
+      }
+
+      if (sectionElement.offsetTop <= scrollMarker) {
+        currentSectionHref = link.href;
+      }
+    }
+
+    if (pageBottom) {
+      currentSectionHref = navLinks[navLinks.length - 1].href;
+    }
+
+    return currentSectionHref;
+  };
+
+  useEffect(() => {
+    const updateActiveLinkFromScroll = () => {
+      if (lockedNavHref) {
+        return;
+      }
+
+      const currentSectionHref = getCurrentSectionHref();
+
+      setActiveNavLink((previousHref) =>
+        previousHref === currentSectionHref ? previousHref : currentSectionHref
+      );
+    };
+
+    updateActiveLinkFromScroll();
+
+    window.addEventListener("scroll", updateActiveLinkFromScroll, { passive: true });
+    window.addEventListener("resize", updateActiveLinkFromScroll);
+
+    return () => {
+      window.removeEventListener("scroll", updateActiveLinkFromScroll);
+      window.removeEventListener("resize", updateActiveLinkFromScroll);
+    };
+  }, [lockedNavHref]);
+
+  useEffect(() => {
+    return () => {
+      if (scrollCheckFrameRef.current !== null) {
+        cancelAnimationFrame(scrollCheckFrameRef.current);
+      }
+    };
+  }, []);
+
   const closeMenu = () => setMenuOpen(false);
+
+  const scrollToSection = (href) => (event) => {
+    event.preventDefault();
+
+    const targetElement = document.querySelector(href);
+    if (!targetElement) {
+      return;
+    }
+
+    const headerElement = document.querySelector(".site-header");
+    const headerOffset = (headerElement?.offsetHeight ?? 0) + 16;
+    const rawTargetTop = targetElement.getBoundingClientRect().top + window.scrollY - headerOffset;
+    const maxScrollTop = document.documentElement.scrollHeight - window.innerHeight;
+    const targetTop = Math.max(Math.min(rawTargetTop, maxScrollTop), 0);
+
+    if (scrollCheckFrameRef.current !== null) {
+      cancelAnimationFrame(scrollCheckFrameRef.current);
+    }
+
+    window.history.pushState(null, "", href);
+    setLockedNavHref(href);
+    setActiveNavLink(href);
+    closeMenu();
+    window.scrollTo({
+      top: targetTop,
+      behavior: "smooth",
+    });
+
+    const scrollDeadline = performance.now() + 1400;
+
+    const releaseNavLock = () => {
+      const reachedTarget = Math.abs(window.scrollY - targetTop) < 4;
+      const timedOut = performance.now() >= scrollDeadline;
+
+      if (!reachedTarget && !timedOut) {
+        scrollCheckFrameRef.current = window.requestAnimationFrame(releaseNavLock);
+        return;
+      }
+
+      scrollCheckFrameRef.current = null;
+      setLockedNavHref(null);
+      setActiveNavLink(getCurrentSectionHref());
+    };
+
+    scrollCheckFrameRef.current = window.requestAnimationFrame(releaseNavLock);
+  };
 
   const handleChange = (event) => {
     const { name, value } = event.target;
@@ -200,7 +308,7 @@ function App() {
 
       <header className="site-header">
         <div className="container nav-row">
-          <a className="brand" href="#home" onClick={closeMenu}>
+          <a className="brand" href="#home" onClick={scrollToSection("#home")}>
             <MdOutlineHealthAndSafety className="brand-icon" />
             <span>SkinAI</span>
           </a>
@@ -219,9 +327,10 @@ function App() {
             {navLinks.map((link) => (
               <a
                 key={link.label}
-                className={link.accent ? "nav-link nav-link-accent" : "nav-link"}
+                className={(lockedNavHref ?? activeNavLink) === link.href ? "nav-link nav-link-active" : "nav-link"}
                 href={link.href}
-                onClick={closeMenu}
+                aria-current={(lockedNavHref ?? activeNavLink) === link.href ? "page" : undefined}
+                onClick={scrollToSection(link.href)}
               >
                 {link.label}
               </a>
@@ -243,11 +352,11 @@ function App() {
               </p>
 
               <div className="hero-actions">
-                <a className="primary-button" href="#diagnosis">
+                <a className="primary-button" href="#diagnosis" onClick={scrollToSection("#diagnosis")}>
                   Start Smart Scan
                   <FiArrowRight />
                 </a>
-                <a className="secondary-button" href="#about">
+                <a className="secondary-button" href="#about" onClick={scrollToSection("#about")}>
                   See How It Works
                 </a>
               </div>
@@ -543,7 +652,7 @@ function App() {
       <footer className="site-footer">
         <div className="container footer-grid">
           <div>
-            <a className="brand footer-brand" href="#home">
+            <a className="brand footer-brand" href="#home" onClick={scrollToSection("#home")}>
               <MdOutlineHealthAndSafety className="brand-icon" />
               <span>SkinAI</span>
             </a>
@@ -556,9 +665,9 @@ function App() {
           <div>
             <h3>Quick Links</h3>
             <div className="footer-links">
-              <a href="#home">Home</a>
-              <a href="#about">About</a>
-              <a href="#diagnosis">Diagnosis</a>
+              <a href="#home" onClick={scrollToSection("#home")}>Home</a>
+              <a href="#about" onClick={scrollToSection("#about")}>About</a>
+              <a href="#diagnosis" onClick={scrollToSection("#diagnosis")}>Diagnosis</a>
             </div>
           </div>
 

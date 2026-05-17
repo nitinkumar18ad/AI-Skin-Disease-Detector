@@ -25,6 +25,7 @@
 
 html {
   scroll-behavior: smooth;
+  scroll-padding-top: 6.5rem;
 }
 
 body {
@@ -36,6 +37,10 @@ body {
     radial-gradient(circle at top left, rgba(216, 91, 47, 0.16), transparent 26%),
     radial-gradient(circle at 85% 18%, rgba(18, 117, 110, 0.12), transparent 24%),
     linear-gradient(180deg, #fffaf5 0%, #f6f3ec 42%, #f9f5ef 100%);
+}
+
+section[id] {
+  scroll-margin-top: 6.5rem;
 }
 
 a {
@@ -160,7 +165,7 @@ code {
 }
 
 .nav-link:hover,
-.nav-link-accent {
+.nav-link-active {
   color: var(--primary);
 }
 
